@@ -1,51 +1,125 @@
 package com.example.todolist;
 
 import javafx.application.Application;
-import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
-import javafx.scene.layout.*;
+import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
+
+import java.sql.Date;
+import java.sql.PreparedStatement;
+import java.time.LocalDate;
 
 public class TodoListApp extends Application {
     private Stage primaryStage;
-    private ListView<String> todoListView;
-    private ObservableList<String> todoItems;
+    private TableView<TodoItem> tableView;
+    private ObservableList<TodoItem> todoItems;
+    private DatabaseManager databaseManager;
 
     public static void main(String[] args) {
         launch(args);
     }
-
     @Override
     public void start(Stage primaryStage) {
         this.primaryStage = primaryStage;
         primaryStage.setTitle("To-Do List");
 
-        // 初始化待办事项列表
-        todoItems = FXCollections.observableArrayList();
+        databaseManager = new DatabaseManager(); // Initialize properly
+        TodoItem todoItem = new TodoItem(databaseManager);
 
-        // 创建主页面
+        tableView = new TableView<>();
+        tableView.setItems(todoItems);
+
+        // Create main scene
         Scene mainScene = createMainScene();
 
-        // 默认显示主页面
+        // Set main scene
         primaryStage.setScene(mainScene);
         primaryStage.show();
     }
 
     private Scene createMainScene() {
-        // 顶部标题
+        // Top title label
         Label titleLabel = new Label("To-Do List");
         titleLabel.setStyle("-fx-font-size: 20px;");
 
-        // 中间主体 - 待办事项列表
-        todoListView = new ListView<>();
-        todoListView.setPrefHeight(300);
-        todoListView.setItems(todoItems);
+        // TableView setup
+        this.tableView = new TableView<>();
+        this.tableView.setPrefHeight(300);
+        this.tableView.setItems(todoItems);
 
-        // 底部按钮
+        TableColumn<TodoItem, String> contentColumn = new TableColumn<>("Content");
+        contentColumn.setCellValueFactory(new PropertyValueFactory<>("content"));
+
+        TableColumn<TodoItem, String> categoryColumn = new TableColumn<>("Category");
+        categoryColumn.setCellValueFactory(new PropertyValueFactory<>("category"));
+
+        TableColumn<TodoItem, String> timeColumn = new TableColumn<>("Time");
+        timeColumn.setCellValueFactory(new PropertyValueFactory<>("time"));
+
+        TableColumn<TodoItem, String> priorityColumn = new TableColumn<>("Priority");
+        priorityColumn.setCellValueFactory(new PropertyValueFactory<>("priority"));
+
+        TableColumn<TodoItem, Void> updateColumn = new TableColumn<>("Update");
+        updateColumn.setCellFactory(param -> new TableCell<>() {
+            private final Button updateButton = new Button("Update");
+
+            {
+                updateButton.setStyle("-fx-background-color: #4285f4; -fx-text-fill: white; -fx-font-size: 12px;");
+                updateButton.setOnAction(event -> {
+                    TodoItem todoItem = getTableView().getItems().get(getIndex());
+                    primaryStage.setScene(createUpdateTodoScene(todoItem));
+                });
+            }
+
+            @Override
+            protected void updateItem(Void item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty) {
+                    setGraphic(null);
+                } else {
+                    setGraphic(updateButton);
+                }
+            }
+        });
+        updateColumn.setPrefWidth(80);
+
+        TableColumn<TodoItem, Void> deleteColumn = new TableColumn<>("Delete");
+        deleteColumn.setCellFactory(param -> new TableCell<>() {
+            private final Button deleteButton = new Button("Delete");
+
+            {
+                deleteButton.setStyle("-fx-background-color: #f44336; -fx-text-fill: white; -fx-font-size: 12px;");
+                deleteButton.setOnAction(event -> {
+                    TodoItem todoItem = getTableView().getItems().get(getIndex());
+                    TodoItem.deleteFromDatabase(todoItem);
+                    todoItems.remove(todoItem); // Remove the item from the list
+                    TodoListApp.this.tableView.refresh(); // Refresh the table view
+                });
+            }
+
+            @Override
+            protected void updateItem(Void item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty) {
+                    setGraphic(null);
+                } else {
+                    setGraphic(deleteButton);
+                }
+            }
+        });
+        deleteColumn.setPrefWidth(80);
+
+        this.tableView.getColumns().addAll(contentColumn, categoryColumn, timeColumn, priorityColumn, updateColumn, deleteColumn);
+
+
+        // Bottom buttons
         Button addTodoButton = new Button("New To-Do list");
         addTodoButton.setOnAction(e -> primaryStage.setScene(createAddTodoScene()));
 
@@ -54,23 +128,16 @@ public class TodoListApp extends Application {
         bottomBar.setPadding(new Insets(10));
         bottomBar.setStyle("-fx-background-color: #f0f0f0;");
 
-        // 设置按钮
-        Button settingsButton = new Button("Setting");
-        settingsButton.setOnAction(e -> primaryStage.setScene(createSettingsScene()));
-        HBox settingsBar = new HBox(settingsButton);
-        settingsBar.setAlignment(Pos.CENTER_RIGHT);
-        settingsBar.setPadding(new Insets(10));
-        settingsBar.setStyle("-fx-background-color: #f0f0f0;");
-
-        // 主页布局
-        VBox mainLayout = new VBox(titleLabel, settingsBar, todoListView, bottomBar);
+        // Main layout
+        VBox mainLayout = new VBox(titleLabel, this.tableView, bottomBar);
         mainLayout.setSpacing(10);
         mainLayout.setPadding(new Insets(10));
 
-        return new Scene(mainLayout, 400, 500);
+        return new Scene(mainLayout, 600, 400);
     }
 
     private Scene createAddTodoScene() {
+        databaseManager = new DatabaseManager();
         // 顶部标题
         Label titleLabel = new Label("New To-Do");
         titleLabel.setStyle("-fx-font-size: 20px;");
@@ -105,8 +172,19 @@ public class TodoListApp extends Application {
             String category = categoryComboBox.getValue();
             String date = datePicker.getValue() != null ? datePicker.getValue().toString() : "";
             String priority = priorityComboBox.getValue();
-            String todoItem = "Content: " + content + ", Category: " + category + ", Time: " + date + ", Priority: " + priority;
-            todoItems.add(todoItem);
+
+            try {
+                PreparedStatement preparedStatement = databaseManager.getConnection().prepareStatement("INSERT INTO todos (content, category, date, priority) VALUES (?, ?, ?, ?)");
+                preparedStatement.setString(1, content);
+                preparedStatement.setString(2, category);
+                preparedStatement.setDate(3, Date.valueOf(date));
+                preparedStatement.setString(4, priority);
+
+                preparedStatement.executeUpdate();
+            } catch (Exception exception) {
+                exception.printStackTrace();
+            }
+
             primaryStage.setScene(createMainScene());
         });
 
@@ -125,50 +203,92 @@ public class TodoListApp extends Application {
 
         return new Scene(addTodoSceneLayout, 400, 500);
     }
+    private Scene createUpdateTodoScene(TodoItem todoItem) {
+        databaseManager = new DatabaseManager();
 
-    private Scene createSettingsScene() {
-        // 顶部标题
-        Label titleLabel = new Label("Setting");
+        // Top title label
+        Label titleLabel = new Label("Update To-Do");
         titleLabel.setStyle("-fx-font-size: 20px;");
 
-        // 主体内容
-        CheckBox themeCheckBox = new CheckBox("Switching theme colours");
-        Slider fontSizeSlider = new Slider(10, 20, 14);
-        ComboBox<String> sortingComboBox = new ComboBox<>();
-        sortingComboBox.getItems().addAll("By Name", "By Time", "By Priority");
+        // Center layout for the "Update To-Do" scene
+        VBox updateTodoLayout = new VBox(titleLabel);
 
-        Button clearButton = new Button("Clear of completed item");
-        clearButton.setOnAction(e -> todoItems.clear());
+        // Content input
+        TextField todoContentTextField = new TextField();
+        todoContentTextField.setText(todoItem.getContent());
+        updateTodoLayout.getChildren().addAll(new Label("Content:"), todoContentTextField);
 
-        VBox settingsLayout = new VBox(
-                new Label("Theme Colour:"),
-                themeCheckBox,
-                new Label("Font Size:"),
-                fontSizeSlider,
-                new Label("Sort by:"),
-                sortingComboBox,
-                clearButton
-        );
-        settingsLayout.setSpacing(10);
-        settingsLayout.setPadding(new Insets(10));
+        // Category selection
+        ComboBox<String> categoryComboBox = new ComboBox<>();
+        categoryComboBox.getItems().addAll("Work", "Learn", "Life");
+        categoryComboBox.setValue(todoItem.getCategory());
+        updateTodoLayout.getChildren().addAll(new Label("Category:"), categoryComboBox);
 
-        // 底部按钮
-        Button saveButton = new Button("Save Setting");
-        saveButton.setOnAction(e -> primaryStage.setScene(createMainScene()));
+        // Date picker
+        DatePicker datePicker = new DatePicker();
+        if (!todoItem.getDate().isEmpty()) {
+            datePicker.setValue(LocalDate.parse(todoItem.getDate()));
+        }
+        updateTodoLayout.getChildren().addAll(new Label("Time:"), datePicker);
+
+        // Priority selection
+        ComboBox<String> priorityComboBox = new ComboBox<>();
+        priorityComboBox.getItems().addAll("Low", "Medium", "High");
+        priorityComboBox.setValue(todoItem.getPriority());
+        updateTodoLayout.getChildren().addAll(new Label("Priority:"), priorityComboBox);
+
+        updateTodoLayout.setSpacing(10);
+        updateTodoLayout.setPadding(new Insets(10));
+
+        // Bottom buttons
 
         Button backButton = new Button("Back");
+        Button saveButton = new Button("Save");
+        saveButton.setOnAction(e -> {
+            String content = todoContentTextField.getText();
+            String category = categoryComboBox.getValue();
+            String date = datePicker.getValue() != null ? datePicker.getValue().toString() : "";
+            String priority = priorityComboBox.getValue();
+
+            try  {
+                PreparedStatement preparedStatement = databaseManager.getConnection().prepareStatement("UPDATE todos SET content=?, category=?, date=?, priority=? WHERE id=?");
+                preparedStatement.setString(1, content);
+                preparedStatement.setString(2, category);
+                preparedStatement.setDate(3, Date.valueOf(date));
+                preparedStatement.setString(4, priority);
+                preparedStatement.executeUpdate();
+            } catch (Exception exception) {
+                exception.printStackTrace();
+            }
+        });
         backButton.setOnAction(e -> primaryStage.setScene(createMainScene()));
 
         HBox bottomBar = new HBox(saveButton, backButton);
         bottomBar.setAlignment(Pos.CENTER);
         bottomBar.setPadding(new Insets(10));
         bottomBar.setStyle("-fx-background-color: #f0f0f0;");
+        updateTodoLayout.getChildren().add(bottomBar);
 
-        // 设置页面布局
-        VBox settingsSceneLayout = new VBox(titleLabel, settingsLayout, bottomBar);
-        settingsSceneLayout.setSpacing(10);
-        settingsSceneLayout.setPadding(new Insets(10));
+        // Update scene layout
+        VBox updateTodoSceneLayout = new VBox(updateTodoLayout);
+        updateTodoSceneLayout.setSpacing(10);
+        updateTodoSceneLayout.setPadding(new Insets(10));
 
-        return new Scene(settingsSceneLayout, 400, 500);
+        // Return the scene
+        Scene updateTodoScene = new Scene(updateTodoSceneLayout, 400, 500);
+        return updateTodoScene;
+    }
+    private static class GetAllTodoItemsTask extends Task<ObservableList<TodoItem>> {
+        private DatabaseManager databaseManager;
+        public GetAllTodoItemsTask(DatabaseManager databaseManager) {
+            this.databaseManager = databaseManager;
+        }
+
+        @Override
+        protected ObservableList<TodoItem> call() throws Exception {
+            // Retrieve data from the database using the databaseManager
+            // Return an ObservableList of TodoItem instances
+            return null;
+        }
     }
 }
