@@ -275,20 +275,6 @@ public class TodoListApp extends Application {
         updateTodoSceneLayout.setPadding(new Insets(10));
 
         // Return the scene
-        Scene updateTodoScene = new Scene(updateTodoSceneLayout, 400, 500);
-        return updateTodoScene;
-    }
-    private static class GetAllTodoItemsTask extends Task<ObservableList<TodoItem>> {
-        private DatabaseManager databaseManager;
-        public GetAllTodoItemsTask(DatabaseManager databaseManager) {
-            this.databaseManager = databaseManager;
-        }
-
-        @Override
-        protected ObservableList<TodoItem> call() throws Exception {
-            // Retrieve data from the database using the databaseManager
-            // Return an ObservableList of TodoItem instances
-            return null;
-        }
+        return new Scene(updateTodoSceneLayout, 400, 500);
     }
 }
