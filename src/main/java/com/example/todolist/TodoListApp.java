@@ -1,8 +1,8 @@
 package com.example.todolist;
 
 import javafx.application.Application;
+import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
-import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -12,9 +12,11 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 
-import java.sql.Date;
-import java.sql.PreparedStatement;
 import java.time.LocalDate;
+import java.util.Arrays;
+import java.util.List;
+
+import static com.example.todolist.TodoItem.showErrorAlert;
 
 public class TodoListApp extends Application {
     private Stage primaryStage;
@@ -32,10 +34,11 @@ public class TodoListApp extends Application {
 
         this.databaseManager = new DatabaseManager();
 
-        Task<ObservableList<TodoItem>> task = new GetAllTodoItemsTask(databaseManager);
-        todoItems = task.valueProperty().get();
+        todoItems = FXCollections.observableArrayList();
 
-        tableView = new TableView<>();
+        fetchTodoItemsFromDatabase();
+
+        tableView = new TableView<TodoItem>();
         tableView.setItems(todoItems);
 
         // Create main scene
@@ -63,10 +66,22 @@ public class TodoListApp extends Application {
         categoryColumn.setCellValueFactory(new PropertyValueFactory<>("category"));
 
         TableColumn<TodoItem, String> timeColumn = new TableColumn<>("Time");
-        timeColumn.setCellValueFactory(new PropertyValueFactory<>("time"));
+        timeColumn.setCellValueFactory(new PropertyValueFactory<>("date"));
+        timeColumn.setComparator((date1, date2) -> {
+            LocalDate localDate1 = LocalDate.parse(date1);
+            LocalDate localDate2 = LocalDate.parse(date2);
+            return localDate1.compareTo(localDate2);
+        });
 
         TableColumn<TodoItem, String> priorityColumn = new TableColumn<>("Priority");
         priorityColumn.setCellValueFactory(new PropertyValueFactory<>("priority"));
+        priorityColumn.setComparator((priority1, priority2) -> {
+            // Define the priority order
+            List<String> priorityOrder = Arrays.asList("High", "Medium", "Low");
+            int index1 = priorityOrder.indexOf(priority1);
+            int index2 = priorityOrder.indexOf(priority2);
+            return Integer.compare(index1, index2);
+        });
 
         TableColumn<TodoItem, Void> updateColumn = new TableColumn<>("Update");
         updateColumn.setCellFactory(param -> new TableCell<>() {
@@ -76,6 +91,8 @@ public class TodoListApp extends Application {
                 updateButton.setStyle("-fx-background-color: #4285f4; -fx-text-fill: white; -fx-font-size: 12px;");
                 updateButton.setOnAction(event -> {
                     TodoItem todoItem = getTableView().getItems().get(getIndex());
+                    TodoItem.updateInDatabase(databaseManager,todoItem);
+                    refreshTableView();
                     primaryStage.setScene(createUpdateTodoScene(todoItem));
                 });
             }
@@ -99,10 +116,10 @@ public class TodoListApp extends Application {
             {
                 deleteButton.setStyle("-fx-background-color: #f44336; -fx-text-fill: white; -fx-font-size: 12px;");
                 deleteButton.setOnAction(event -> {
-                    TodoItem todoItem = getTableView().getItems().get(getIndex());
-                    TodoItem.deleteFromDatabase(todoItem);
+                    TodoItem todoItem = tableView.getSelectionModel().getSelectedItem();
+                    TodoItem.deleteFromDatabase(databaseManager, todoItem);
                     todoItems.remove(todoItem); // Remove the item from the list
-                    TodoListApp.this.tableView.refresh(); // Refresh the table view
+                    tableView.refresh();  // Refresh the table view
                 });
             }
 
@@ -116,10 +133,17 @@ public class TodoListApp extends Application {
                 }
             }
         });
+        contentColumn.setSortable(false);
+        categoryColumn.setSortable(false);
+        timeColumn.setSortable(true);  // Make the Time column sortable
+        priorityColumn.setSortable(true);  // Make the Priority column sortable
+        updateColumn.setSortable(false);
+        deleteColumn.setSortable(false);
+
         deleteColumn.setPrefWidth(80);
 
         this.tableView.getColumns().addAll(contentColumn, categoryColumn, timeColumn, priorityColumn, updateColumn, deleteColumn);
-
+        this.tableView.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
 
         // Bottom buttons
         Button addTodoButton = new Button("New To-Do list");
@@ -134,6 +158,7 @@ public class TodoListApp extends Application {
         VBox mainLayout = new VBox(titleLabel, this.tableView, bottomBar);
         mainLayout.setSpacing(10);
         mainLayout.setPadding(new Insets(10));
+        tableView.refresh();  // Refresh the table view
 
         return new Scene(mainLayout, 600, 400);
     }
@@ -174,19 +199,16 @@ public class TodoListApp extends Application {
             String date = datePicker.getValue() != null ? datePicker.getValue().toString() : "";
             String priority = priorityComboBox.getValue();
 
-            try {
-                PreparedStatement preparedStatement = databaseManager.getConnection().prepareStatement("INSERT INTO todos (content, category, date, priority) VALUES (?, ?, ?, ?)");
-                preparedStatement.setString(1, content);
-                preparedStatement.setString(2, category);
-                preparedStatement.setDate(3, Date.valueOf(date));
-                preparedStatement.setString(4, priority);
+            if (content.isEmpty() || category.isEmpty() || date.isEmpty() || priority.isEmpty()) {
+                showErrorAlert("Please Fill in all Fields");
+            }else {
+                TodoItem newItem = new TodoItem(0, content, category, date, priority);
+                TodoItem.insertIntoDatabase(databaseManager, newItem);
 
-                preparedStatement.executeUpdate();
-            } catch (Exception exception) {
-                exception.printStackTrace();
+                refreshTableView();
+
+                primaryStage.setScene(createMainScene());
             }
-
-            primaryStage.setScene(createMainScene());
         });
 
         Button backButton = new Button("Back");
@@ -249,15 +271,15 @@ public class TodoListApp extends Application {
             String date = datePicker.getValue() != null ? datePicker.getValue().toString() : "";
             String priority = priorityComboBox.getValue();
 
-            try  {
-                PreparedStatement preparedStatement = databaseManager.getConnection().prepareStatement("UPDATE todos SET content=?, category=?, date=?, priority=? WHERE id=?");
-                preparedStatement.setString(1, content);
-                preparedStatement.setString(2, category);
-                preparedStatement.setDate(3, Date.valueOf(date));
-                preparedStatement.setString(4, priority);
-                preparedStatement.executeUpdate();
-            } catch (Exception exception) {
-                exception.printStackTrace();
+            if (content.isEmpty() || category.isEmpty() || date.isEmpty() || priority.isEmpty()) {
+                showErrorAlert("Please Fill in all fields.");
+            }else {
+
+                TodoItem updatedItem = new TodoItem(todoItem.getId(), content, category, date, priority);
+                TodoItem.updateInDatabase(databaseManager, updatedItem);
+
+                refreshTableView();
+                primaryStage.setScene(createMainScene());
             }
         });
         backButton.setOnAction(e -> primaryStage.setScene(createMainScene()));
@@ -275,5 +297,13 @@ public class TodoListApp extends Application {
 
         // Return the scene
         return new Scene(updateTodoSceneLayout, 400, 500);
+    }
+    private void fetchTodoItemsFromDatabase() {
+        todoItems.clear();
+        todoItems.addAll(TodoItem.getAllFromDatabase(databaseManager));
+    }
+    public void refreshTableView() {
+        fetchTodoItemsFromDatabase();
+        tableView.refresh();
     }
 }
