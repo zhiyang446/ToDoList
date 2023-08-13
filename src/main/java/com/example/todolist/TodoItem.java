@@ -15,7 +15,7 @@ public class TodoItem {
 
     public TodoItem(int id, DatabaseManager databaseManager, String content, String category, String date, String priority) {
         TodoItem.id = id;
-        TodoItem.databaseManager = databaseManager;
+        TodoItem.databaseManager = new DatabaseManager();
         this.content = content;
         this.category = category;
         this.date = date;

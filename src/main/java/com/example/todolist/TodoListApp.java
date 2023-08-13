@@ -20,7 +20,7 @@ public class TodoListApp extends Application {
     private Stage primaryStage;
     private TableView<TodoItem> tableView;
     private ObservableList<TodoItem> todoItems;
-    private DatabaseManager databaseManager;
+    private  DatabaseManager databaseManager;
 
     public static void main(String[] args) {
         launch(args);
@@ -30,8 +30,10 @@ public class TodoListApp extends Application {
         this.primaryStage = primaryStage;
         primaryStage.setTitle("To-Do List");
 
-        databaseManager = new DatabaseManager(); // Initialize properly
-        TodoItem todoItem = new TodoItem(databaseManager);
+        this.databaseManager = new DatabaseManager();
+
+        Task<ObservableList<TodoItem>> task = new GetAllTodoItemsTask(databaseManager);
+        todoItems = task.valueProperty().get();
 
         tableView = new TableView<>();
         tableView.setItems(todoItems);
@@ -137,7 +139,6 @@ public class TodoListApp extends Application {
     }
 
     private Scene createAddTodoScene() {
-        databaseManager = new DatabaseManager();
         // 顶部标题
         Label titleLabel = new Label("New To-Do");
         titleLabel.setStyle("-fx-font-size: 20px;");
@@ -204,8 +205,6 @@ public class TodoListApp extends Application {
         return new Scene(addTodoSceneLayout, 400, 500);
     }
     private Scene createUpdateTodoScene(TodoItem todoItem) {
-        databaseManager = new DatabaseManager();
-
         // Top title label
         Label titleLabel = new Label("Update To-Do");
         titleLabel.setStyle("-fx-font-size: 20px;");

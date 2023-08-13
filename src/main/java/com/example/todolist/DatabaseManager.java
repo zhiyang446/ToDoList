@@ -21,7 +21,4 @@ public class DatabaseManager {
     public Connection getConnection() {
         return connection;
     }
-    public boolean isConnected() {
-        return connection != null;
-    }
 }
